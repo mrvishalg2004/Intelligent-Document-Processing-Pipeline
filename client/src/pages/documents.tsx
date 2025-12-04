@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -29,10 +30,10 @@ import { format } from "date-fns";
 function getStatusBadge(status: string) {
   switch (status) {
     case "completed":
-      return <Badge variant="secondary" className="bg-chart-2/10 text-chart-2 border-0">Completed</Badge>;
+      return <Badge variant="secondary" className="bg-green-600/10 text-green-700 border-0">Completed</Badge>;
     case "processing":
       return (
-        <Badge variant="secondary" className="bg-chart-4/10 text-chart-4 border-0">
+        <Badge variant="secondary" className="bg-blue-600/10 text-blue-700 border-0">
           <Loader2 className="w-3 h-3 mr-1 animate-spin" />
           Processing
         </Badge>
@@ -47,9 +48,9 @@ function getStatusBadge(status: string) {
 function getStatusIcon(status: string) {
   switch (status) {
     case "completed":
-      return <CheckCircle2 className="w-5 h-5 text-chart-2" />;
+      return <CheckCircle2 className="w-5 h-5 text-green-600" />;
     case "processing":
-      return <Loader2 className="w-5 h-5 text-chart-4 animate-spin" />;
+      return <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />;
     case "error":
       return <AlertCircle className="w-5 h-5 text-destructive" />;
     default:
@@ -63,13 +64,14 @@ export default function Documents() {
 
   const { data: documents, isLoading } = useQuery<Document[]>({
     queryKey: ["/api/documents"],
+    refetchInterval: 5000, // Refetch every 5 seconds
   });
 
   const filteredDocuments = documents?.filter(doc => {
     const matchesSearch = doc.originalName.toLowerCase().includes(searchQuery.toLowerCase());
     const matchesStatus = statusFilter === "all" || doc.status === statusFilter;
     return matchesSearch && matchesStatus;
-  });
+  }).sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
 
   const formatFileSize = (bytes: number) => {
     if (bytes < 1024) return bytes + " B";
@@ -141,17 +143,15 @@ export default function Documents() {
               {filteredDocuments.map((doc) => (
                 <Link key={doc.id} href={`/documents/${doc.id}`}>
                   <div 
-                    className="flex items-center gap-4 p-4 rounded-lg bg-muted/50 hover-elevate cursor-pointer transition-all"
+                    className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-lg bg-muted/50 hover-elevate cursor-pointer transition-all"
                     data-testid={`document-row-${doc.id}`}
                   >
                     <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-6 h-6 text-primary" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <p className="font-medium truncate">{doc.originalName}</p>
-                      </div>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <p className="font-medium truncate mb-1">{doc.originalName}</p>
+                      <div className="flex items-center flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
                         <span>{formatFileSize(doc.fileSize)}</span>
                         {doc.pageCount && (
                           <span>{doc.pageCount} {doc.pageCount === 1 ? "page" : "pages"}</span>
@@ -161,8 +161,15 @@ export default function Documents() {
                         </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-3 flex-shrink-0">
-                      {getStatusBadge(doc.status)}
+                    <div className="flex items-center gap-3 flex-shrink-0 w-full sm:w-auto">
+                      <div className="flex-1 sm:flex-none">
+                        {doc.status === 'processing' && doc.processingProgress ? (
+                          <div className="flex items-center gap-2">
+                            <Progress value={doc.processingProgress} className="w-24 h-2" />
+                            <span className="text-xs text-muted-foreground">{doc.processingProgress}%</span>
+                          </div>
+                        ) : getStatusBadge(doc.status)}
+                      </div>
                       {getStatusIcon(doc.status)}
                     </div>
                   </div>

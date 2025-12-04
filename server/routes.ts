@@ -1,13 +1,19 @@
+
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
+import { createRequire } from "module";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import { storage } from "./storage";
 import { setupAuth, isAuthenticated } from "./replitAuth";
-import { generateChatResponse, generateDocumentSummary, extractKeywords, isOpenAIConfigured } from "./openai";
+import { generateChatResponse } from "./openai";
+import { generateDocumentSummary, extractKeywords, isGeminiConfigured } from "./gemini";
 import { extractEntities, extractTablesFromText, getTextStatistics, extractKeywordsFromText } from "./nlp";
 import type { DocumentAnalysis } from "@shared/schema";
+
+const require = createRequire(import.meta.url);
+const pdf = require("pdf-parse");
 
 // Configure multer for file uploads
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -28,7 +34,7 @@ const multerStorage = multer.diskStorage({
 const upload = multer({
   storage: multerStorage,
   limits: {
-    fileSize: 50 * 1024 * 1024, // 50MB limit
+    fileSize: 100 * 1024 * 1024, // 100MB limit
   },
   fileFilter: (_req, file, cb) => {
     if (file.mimetype === "application/pdf") {
@@ -254,71 +260,81 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // On startup, find and re-process any documents that are stuck in the "processing" state.
+  // This is a recovery mechanism for documents that were being processed when the server previously crashed.
+  (async () => {
+    try {
+      console.log("Checking for documents stuck in 'processing' state...");
+      // In local dev, we use a mock user ID.
+      const mockUserId = "mock-user-id-123";
+      const documents = await storage.getDocuments(mockUserId);
+      const stuckDocuments = documents.filter(doc => doc.status === 'processing');
+
+      if (stuckDocuments.length > 0) {
+        console.log(`Found ${stuckDocuments.length} stuck document(s). Restarting processing...`);
+        
+        const reprocessingPromises = stuckDocuments.map(doc => {
+          const filePath = path.join(uploadDir, doc.filename);
+          if (fs.existsSync(filePath)) {
+            console.log(`- Reprocessing: ${doc.originalName} (ID: ${doc.id})`);
+            return processDocument(doc.id, filePath);
+          } else {
+            console.warn(`- File not found for document ${doc.id}. Marking as error.`);
+            return storage.updateDocument(doc.id, { status: "error" });
+          }
+        });
+
+        await Promise.all(reprocessingPromises);
+        console.log("Finished reprocessing stuck documents.");
+
+      } else {
+        console.log("No stuck documents found. System is clean.");
+      }
+    } catch (error) {
+      console.error("Error during startup reprocessing of stuck documents:", error);
+    }
+  })();
+
   const httpServer = createServer(app);
   return httpServer;
 }
 
-// Process document in background
 async function processDocument(documentId: string, filePath: string): Promise<void> {
   try {
+    await storage.updateDocument(documentId, { status: "processing", processingProgress: 10 });
+
     // Read and parse PDF
     const dataBuffer = fs.readFileSync(filePath);
-    // Use dynamic import for pdf-parse (CommonJS module)
-    const pdfParse = (await import("pdf-parse")).default;
-    const pdfData = await pdfParse(dataBuffer);
+    const pdfData = await pdf(dataBuffer);
+    await storage.updateDocument(documentId, { processingProgress: 25 });
 
     const text = pdfData.text || "";
     const pageCount = pdfData.numpages || 1;
 
-    // Create page record
+    // Save extracted text
     await storage.createPage({
       documentId,
       pageNumber: 1,
       extractedText: text,
       ocrConfidence: 1.0,
     });
+    await storage.updateDocument(documentId, { processingProgress: 40 });
 
-    // Extract entities using NLP
-    const entities = extractEntities(text);
-    
-    // Extract keywords using NLP
-    const nlpKeywords = extractKeywordsFromText(text);
-    
-    // Extract tables
-    const tables = extractTablesFromText(text);
-    
-    // Get text statistics
-    const stats = getTextStatistics(text);
+    // Run NLP tasks in parallel
+    const [entities, nlpKeywords, tables, stats] = await Promise.all([
+      Promise.resolve(extractEntities(text)),
+      Promise.resolve(extractKeywordsFromText(text)),
+      Promise.resolve(extractTablesFromText(text)),
+      Promise.resolve(getTextStatistics(text)),
+    ]);
+    await storage.updateDocument(documentId, { processingProgress: 60 });
 
-    // Generate AI-powered summary and keywords if OpenAI is available
-    let summary = "";
-    let aiKeywords: string[] = [];
-    
-    if (isOpenAIConfigured()) {
-      try {
-        [summary, aiKeywords] = await Promise.all([
-          generateDocumentSummary(text),
-          extractKeywords(text),
-        ]);
-      } catch (aiError) {
-        console.error("AI processing error:", aiError);
-        // Use NLP-based summary as fallback
-        const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20).slice(0, 3);
-        summary = sentences.join(". ") + (sentences.length > 0 ? "." : "No summary available.");
-      }
-    } else {
-      // Use basic NLP summary
-      const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20).slice(0, 3);
-      summary = sentences.join(". ") + (sentences.length > 0 ? "." : "No summary available.");
-    }
+    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20).slice(0, 3);
+    const summary = sentences.join(". ") + (sentences.length > 0 ? "." : "No summary available.");
 
-    // Combine keywords
-    const keywords = [...new Set([...aiKeywords, ...nlpKeywords])].slice(0, 15);
-
-    // Create analysis extraction
     const analysis: DocumentAnalysis = {
       summary,
-      keywords,
+      keywords: nlpKeywords.slice(0, 15),
       entities,
       tables,
       wordCount: stats.wordCount,
@@ -330,16 +346,44 @@ async function processDocument(documentId: string, filePath: string): Promise<vo
       extractionType: "analysis",
       data: analysis,
     });
+    await storage.updateDocument(documentId, { processingProgress: 80 });
 
-    // Update document status
+    // Enhance with AI if configured
+    if (isGeminiConfigured()) {
+      await enhanceAnalysisWithAI(documentId, text);
+      await storage.updateDocument(documentId, { processingProgress: 90 });
+    }
+
     await storage.updateDocument(documentId, {
       status: "completed",
       processedAt: new Date(),
       pageCount,
+      processingProgress: 100,
     });
+
   } catch (error) {
     console.error("Error processing document:", error);
-    await storage.updateDocument(documentId, { status: "error" });
+    await storage.updateDocument(documentId, { status: "error", processingProgress: -1 });
     throw error;
+  }
+}
+
+async function enhanceAnalysisWithAI(documentId: string, text: string): Promise<void> {
+  try {
+    const [summary, aiKeywords] = await Promise.all([
+      generateDocumentSummary(text),
+      extractKeywords(text),
+    ]);
+
+    const existingExtraction = await storage.getExtraction(documentId, "analysis");
+    if (existingExtraction) {
+      const analysis = existingExtraction.data as DocumentAnalysis;
+      analysis.summary = summary;
+      analysis.keywords = [...new Set([...aiKeywords, ...analysis.keywords])].slice(0, 15);
+      await storage.updateExtraction(existingExtraction.id, analysis);
+    }
+  } catch (error) {
+    console.error("AI enhancement failed:", error);
+    // This is not a critical error, so we don't need to mark the document as failed
   }
 }
