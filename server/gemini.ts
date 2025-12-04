@@ -3,14 +3,16 @@ import type { Content } from "@google/generative-ai";
 
 const API_KEY = process.env.GEMINI_API_KEY;
 
-if (!API_KEY) {
-  throw new Error("GEMINI_API_KEY is not set");
+let genAI: GoogleGenerativeAI | null = null;
+
+if (API_KEY) {
+  genAI = new GoogleGenerativeAI(API_KEY);
+} else {
+  console.warn("GEMINI_API_KEY is not set. AI features will be limited.");
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY);
-
 export function isGeminiConfigured(): boolean {
-  return !!API_KEY;
+  return !!API_KEY && !!genAI;
 }
 
 export async function generateChatResponse(
@@ -18,6 +20,10 @@ export async function generateChatResponse(
   userQuestion: string,
   chatHistory: Array<{ role: "user" | "assistant"; content: string }>
 ): Promise<string> {
+  if (!genAI) {
+    throw new Error("Gemini AI is not configured");
+  }
+  
   const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
   const formattedHistory: Content[] = chatHistory.map(msg => ({
@@ -66,6 +72,10 @@ export async function generateChatResponse(
 }
 
 export async function generateDocumentSummary(text: string): Promise<string> {
+  if (!genAI) {
+    throw new Error("Gemini AI is not configured");
+  }
+  
   const model = genAI.getGenerativeModel({ model: "gemini-pro"});
   const prompt = `Summarize the following text, focusing on the main points and key takeaways.:\n\n${text.slice(0, 12000)}`;
 
@@ -75,6 +85,10 @@ export async function generateDocumentSummary(text: string): Promise<string> {
 }
 
 export async function extractKeywords(text: string): Promise<string[]> {
+  if (!genAI) {
+    throw new Error("Gemini AI is not configured");
+  }
+  
   const model = genAI.getGenerativeModel({ model: "gemini-pro"});
   const prompt = `Extract the 8-12 most important keywords or key phrases from the following text. Return them as a comma-separated list:\n\n${text.slice(0, 12000)}`;
 

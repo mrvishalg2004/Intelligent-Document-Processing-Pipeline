@@ -50,6 +50,29 @@ export class MongoStorage implements IStorage {
     this.pages = db.collection<Page>('pages');
     this.extractions = db.collection<Extraction>('extractions');
     this.chatMessages = db.collection<ChatMessage>('chatMessages');
+    
+    // Create indexes for better performance
+    this.initializeIndexes();
+  }
+
+  private async initializeIndexes() {
+    try {
+      // Document indexes
+      await this.documents.createIndex({ userId: 1, uploadDate: -1 });
+      await this.documents.createIndex({ status: 1 });
+      
+      // Page indexes
+      await this.pages.createIndex({ documentId: 1, pageNumber: 1 });
+      
+      // Extraction indexes
+      await this.extractions.createIndex({ documentId: 1, extractionType: 1 });
+      
+      // Chat message indexes
+      await this.chatMessages.createIndex({ documentId: 1, createdAt: 1 });
+      await this.chatMessages.createIndex({ userId: 1 });
+    } catch (error) {
+      console.error('Error creating indexes:', error);
+    }
   }
 
   // User operations
@@ -80,8 +103,17 @@ export class MongoStorage implements IStorage {
     if (!doc) return null;
 
     const extractions = await this.getExtractions(id);
-    const pages = await this.getPages(id);
-    const extractedText = pages.map(p => p.extractedText).join('\n\n');
+    
+    // Use extractedText from document if available, otherwise get from pages
+    let extractedText = doc.extractedText || '';
+    
+    if (!extractedText) {
+      const pages = await this.getPages(id);
+      extractedText = pages
+        .map(p => p.extractedText || '')
+        .filter(text => text.trim().length > 0)
+        .join('\n\n');
+    }
 
     return { ...doc, extractions, extractedText };
   }
@@ -101,7 +133,15 @@ export class MongoStorage implements IStorage {
   }
 
   async deleteDocument(id: string): Promise<void> {
-    await this.documents.deleteOne({ _id: new ObjectId(id) as any });
+    const objectId = new ObjectId(id);
+    
+    // Delete document and all associated data
+    await Promise.all([
+      this.documents.deleteOne({ _id: objectId as any }),
+      this.pages.deleteMany({ documentId: id }),
+      this.extractions.deleteMany({ documentId: id }),
+      this.chatMessages.deleteMany({ documentId: id })
+    ]);
   }
 
   async searchDocuments(userId: string, query: string): Promise<Document[]> {
@@ -170,8 +210,105 @@ export class MongoStorage implements IStorage {
 
   // Reports data
   async getReportsData(userId: string): Promise<any> {
-    // Implementation for reports data can be added here
-    return {};
+    const allDocs = await this.getDocuments(userId);
+    const completedDocs = allDocs.filter(d => d.status === 'completed');
+    
+    // Calculate total pages and words
+    let totalPages = 0;
+    let totalWords = 0;
+    const entityCounts: Record<string, number> = {};
+    const keywordCounts: Record<string, number> = {};
+    const statusCounts: Record<string, number> = {};
+    
+    for (const doc of allDocs) {
+      totalPages += doc.pageCount || 0;
+      
+      // Status distribution
+      statusCounts[doc.status] = (statusCounts[doc.status] || 0) + 1;
+      
+      // Get extractions for word count, entities, and keywords
+      const extractions = await this.getExtractions((doc as any)._id.toString());
+      const analysisExtraction = extractions.find(e => e.extractionType === 'analysis');
+      
+      if (analysisExtraction && analysisExtraction.data) {
+        const data = analysisExtraction.data;
+        
+        // Word count
+        if (data.statistics?.wordCount) {
+          totalWords += data.statistics.wordCount;
+        }
+        
+        // Count entities
+        if (data.entities) {
+          const allEntities = [
+            ...(data.entities.persons || []),
+            ...(data.entities.organizations || []),
+            ...(data.entities.locations || []),
+            ...(data.entities.dates || []),
+            ...(data.entities.money || [])
+          ];
+          
+          allEntities.forEach(entity => {
+            entityCounts[entity] = (entityCounts[entity] || 0) + 1;
+          });
+        }
+        
+        // Count keywords
+        if (data.keywords && Array.isArray(data.keywords)) {
+          data.keywords.forEach((keyword: string) => {
+            keywordCounts[keyword] = (keywordCounts[keyword] || 0) + 1;
+          });
+        }
+      }
+    }
+    
+    // Documents over time (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const docsByDate: Record<string, number> = {};
+    allDocs.forEach(doc => {
+      try {
+        const uploadDate = doc.uploadDate ? new Date(doc.uploadDate) : new Date();
+        if (!isNaN(uploadDate.getTime())) {
+          const date = uploadDate.toISOString().split('T')[0];
+          docsByDate[date] = (docsByDate[date] || 0) + 1;
+        }
+      } catch (error) {
+        console.error('Invalid date for document:', doc);
+      }
+    });
+    
+    const documentsOverTime = Object.entries(docsByDate)
+      .map(([date, count]) => ({ date, count }))
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-30);
+    
+    // Top entities (top 5)
+    const entityDistribution = Object.entries(entityCounts)
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+    
+    // Top keywords (top 10)
+    const topKeywords = Object.entries(keywordCounts)
+      .map(([keyword, count]) => ({ keyword, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+    
+    // Status distribution
+    const statusDistribution = Object.entries(statusCounts)
+      .map(([status, count]) => ({ status, count }));
+    
+    return {
+      totalDocuments: allDocs.length,
+      totalPages,
+      totalWords,
+      documentsOverTime,
+      entityDistribution,
+      topKeywords,
+      statusDistribution,
+    };
   }
 }
 

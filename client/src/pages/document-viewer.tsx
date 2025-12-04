@@ -237,26 +237,34 @@ export default function DocumentViewer() {
 
               <TabsContent value="entities" className="mt-0">
                 <ScrollArea className="h-[500px] p-6">
-                  {analysis?.entities && analysis.entities.length > 0 ? (
+                  {analysis?.entities ? (
                     <div className="space-y-4">
-                      {["person", "organization", "location", "date", "money", "other"].map(type => {
-                        const typeEntities = analysis.entities.filter(e => e.type === type);
-                        if (typeEntities.length === 0) return null;
+                      {[
+                        { key: 'persons', label: 'person', icon: 'person' },
+                        { key: 'organizations', label: 'organization', icon: 'organization' },
+                        { key: 'locations', label: 'location', icon: 'location' },
+                        { key: 'dates', label: 'date', icon: 'date' },
+                        { key: 'money', label: 'money', icon: 'money' },
+                        { key: 'emails', label: 'email', icon: 'other' },
+                        { key: 'phones', label: 'phone', icon: 'other' }
+                      ].map(({ key, label, icon }) => {
+                        const items = analysis.entities[key as keyof typeof analysis.entities] || [];
+                        if (!Array.isArray(items) || items.length === 0) return null;
                         
                         return (
-                          <div key={type}>
+                          <div key={key}>
                             <h4 className="text-sm font-medium capitalize mb-2 flex items-center gap-2">
-                              <EntityIcon type={type} />
-                              {type}s ({typeEntities.length})
+                              <EntityIcon type={icon} />
+                              {label}s ({items.length})
                             </h4>
                             <div className="flex flex-wrap gap-2">
-                              {typeEntities.map((entity, index) => (
+                              {items.map((text: string, index: number) => (
                                 <Badge 
                                   key={index} 
                                   variant="secondary"
-                                  className={EntityBadgeColor(type)}
+                                  className={EntityBadgeColor(icon)}
                                 >
-                                  {entity.text}
+                                  {text}
                                 </Badge>
                               ))}
                             </div>

@@ -24,6 +24,7 @@ export const DocumentSchema = z.object({
   pageCount: z.number().optional(),
   metadata: z.any().optional(),
   processingProgress: z.number().optional(),
+  extractedText: z.string().optional(),
 });
 
 export const PageSchema = z.object({
@@ -58,3 +59,38 @@ export type Document = z.infer<typeof DocumentSchema>;
 export type Page = z.infer<typeof PageSchema>;
 export type Extraction = z.infer<typeof ExtractionSchema>;
 export type ChatMessage = z.infer<typeof ChatMessageSchema>;
+
+// Document Analysis Type for NLP Extractions
+export interface DocumentAnalysis {
+  entities: {
+    persons: string[];
+    organizations: string[];
+    locations: string[];
+    dates: string[];
+    money: string[];
+    emails: string[];
+    phones: string[];
+  };
+  keywords: string[];
+  summary: string;
+  tables: any[];
+  statistics: {
+    wordCount: number;
+    charCount: number;
+    sentenceCount: number;
+    paragraphCount: number;
+    avgWordsPerSentence: number;
+    readingTime: number;
+  };
+}
+
+// Reports Data Type
+export interface ReportsData {
+  totalDocuments: number;
+  totalPages: number;
+  totalWords: number;
+  documentsOverTime: Array<{ date: string; count: number }>;
+  entityDistribution: Array<{ name: string; value: number }>;
+  topKeywords: Array<{ keyword: string; count: number }>;
+  statusDistribution: Array<{ status: string; count: number }>;
+}

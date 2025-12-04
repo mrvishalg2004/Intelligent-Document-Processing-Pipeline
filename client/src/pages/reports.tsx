@@ -82,11 +82,11 @@ export default function Reports() {
   }
 
   const documentsOverTimeData = {
-    labels: reports?.documentsOverTime.map(d => d.date),
+    labels: reports?.documentsOverTime?.map(d => d.date) || [],
     datasets: [
       {
         label: 'Documents',
-        data: reports?.documentsOverTime.map(d => d.count) || [],
+        data: reports?.documentsOverTime?.map(d => d.count) || [],
         borderColor: 'hsl(var(--primary))',
         backgroundColor: 'hsl(var(--primary))',
       },
@@ -94,10 +94,10 @@ export default function Reports() {
   };
 
   const entityDistributionData = {
-    labels: reports?.entityDistribution.map(e => e.name),
+    labels: reports?.entityDistribution?.map(e => e.name) || [],
     datasets: [
       {
-        data: reports?.entityDistribution.map(e => e.value) || [],
+        data: reports?.entityDistribution?.map(e => e.value) || [],
         backgroundColor: [
           'hsl(var(--chart-1))',
           'hsl(var(--chart-2))',
@@ -110,22 +110,22 @@ export default function Reports() {
   };
 
   const topKeywordsData = {
-    labels: reports?.topKeywords.slice(0, 8).map(k => k.keyword),
+    labels: reports?.topKeywords?.slice(0, 8).map(k => k.keyword) || [],
     datasets: [
       {
         label: 'Count',
-        data: reports?.topKeywords.slice(0, 8).map(k => k.count) || [],
+        data: reports?.topKeywords?.slice(0, 8).map(k => k.count) || [],
         backgroundColor: 'hsl(var(--primary))',
       },
     ],
   };
 
   const statusDistributionData = {
-    labels: reports?.statusDistribution.map(s => s.status),
+    labels: reports?.statusDistribution?.map(s => s.status) || [],
     datasets: [
       {
         label: 'Count',
-        data: reports?.statusDistribution.map(s => s.count) || [],
+        data: reports?.statusDistribution?.map(s => s.count) || [],
         backgroundColor: 'hsl(var(--chart-2))',
       },
     ],

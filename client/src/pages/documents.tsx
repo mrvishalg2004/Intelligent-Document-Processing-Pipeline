@@ -79,11 +79,11 @@ function DocumentRow({ doc, openDeleteDialog }: { doc: Document, openDeleteDialo
   };
   
   return (
-    <Link href={`/documents/${doc.id}`} className="block">
+    <Link href={`/documents/${(doc as any)._id}`} className="block">
       <div
-        key={doc.id}
+        key={(doc as any)._id}
         className="flex flex-col sm:flex-row items-start sm:items-center gap-4 p-4 rounded-lg bg-muted/50 transition-all hover:bg-muted cursor-pointer"
-        data-testid={`document-row-${doc.id}`}
+        data-testid={`document-row-${(doc as any)._id}`}
       >
         <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
           <FileText className="w-6 h-6 text-primary" />
@@ -170,7 +170,7 @@ export default function Documents() {
 
   const handleDeleteConfirm = () => {
     if (documentToDelete) {
-      deleteMutation.mutate(documentToDelete.id);
+      deleteMutation.mutate((documentToDelete as any)._id);
     }
   };
 
