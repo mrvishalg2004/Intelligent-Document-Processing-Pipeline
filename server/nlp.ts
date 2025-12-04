@@ -6,70 +6,94 @@ export function extractEntities(text: string): ExtractedEntity[] {
   const entities: ExtractedEntity[] = [];
   const seen = new Set<string>();
 
-  // Extract people
-  doc.people().forEach((person: any) => {
-    const text = person.text().trim();
-    if (text && text.length > 2 && !seen.has(text.toLowerCase())) {
-      seen.add(text.toLowerCase());
-      entities.push({
-        type: "person",
-        text,
-        confidence: 0.8,
-      });
-    }
-  });
+  try {
+    // Extract people
+    doc.people().forEach((person: any) => {
+      const text = person.text().trim();
+      if (text && text.length > 2 && !seen.has(text.toLowerCase())) {
+        seen.add(text.toLowerCase());
+        entities.push({
+          type: "person",
+          text,
+          confidence: 0.8,
+        });
+      }
+    });
+  } catch (e) {
+    console.warn("Failed to extract people:", e);
+  }
 
-  // Extract organizations
-  doc.organizations().forEach((org: any) => {
-    const text = org.text().trim();
-    if (text && text.length > 2 && !seen.has(text.toLowerCase())) {
-      seen.add(text.toLowerCase());
-      entities.push({
-        type: "organization",
-        text,
-        confidence: 0.75,
-      });
-    }
-  });
+  try {
+    // Extract organizations
+    doc.organizations().forEach((org: any) => {
+      const text = org.text().trim();
+      if (text && text.length > 2 && !seen.has(text.toLowerCase())) {
+        seen.add(text.toLowerCase());
+        entities.push({
+          type: "organization",
+          text,
+          confidence: 0.75,
+        });
+      }
+    });
+  } catch (e) {
+    console.warn("Failed to extract organizations:", e);
+  }
 
-  // Extract places/locations
-  doc.places().forEach((place: any) => {
-    const text = place.text().trim();
-    if (text && text.length > 2 && !seen.has(text.toLowerCase())) {
-      seen.add(text.toLowerCase());
-      entities.push({
-        type: "location",
-        text,
-        confidence: 0.7,
-      });
-    }
-  });
+  try {
+    // Extract places/locations
+    doc.places().forEach((place: any) => {
+      const text = place.text().trim();
+      if (text && text.length > 2 && !seen.has(text.toLowerCase())) {
+        seen.add(text.toLowerCase());
+        entities.push({
+          type: "location",
+          text,
+          confidence: 0.7,
+        });
+      }
+    });
+  } catch (e) {
+    console.warn("Failed to extract places:", e);
+  }
 
-  // Extract dates
-  doc.dates().forEach((date: any) => {
-    const text = date.text().trim();
-    if (text && !seen.has(text.toLowerCase())) {
-      seen.add(text.toLowerCase());
-      entities.push({
-        type: "date",
-        text,
-        confidence: 0.85,
+  try {
+    // Extract dates - check if dates() method exists
+    if (typeof doc.dates === 'function') {
+      doc.dates().forEach((date: any) => {
+        const text = date.text().trim();
+        if (text && !seen.has(text.toLowerCase())) {
+          seen.add(text.toLowerCase());
+          entities.push({
+            type: "date",
+            text,
+            confidence: 0.85,
+          });
+        }
       });
     }
-  });
+  } catch (e) {
+    console.warn("Failed to extract dates:", e);
+  }
 
-  // Extract money/values
-  doc.money().forEach((money: any) => {
-    const text = money.text().trim();
-    if (text && !seen.has(text.toLowerCase())) {
-      seen.add(text.toLowerCase());
-      entities.push({
-        type: "money",
-        text,
-        confidence: 0.9,
+  try {
+    // Extract money/values - check if money() method exists
+    if (typeof doc.money === 'function') {
+      doc.money().forEach((money: any) => {
+        const text = money.text().trim();
+        if (text && !seen.has(text.toLowerCase())) {
+          seen.add(text.toLowerCase());
+          entities.push({
+            type: "money",
+            text,
+            confidence: 0.9,
+          });
+        }
       });
     }
-  });
+  } catch (e) {
+    console.warn("Failed to extract money:", e);
+  }
 
   return entities;
 }
@@ -100,8 +124,15 @@ export function extractKeywordsFromText(text: string): string[] {
   // Sort by frequency in text and return top keywords
   const wordCounts = new Map<string, number>();
   keywords.forEach((word) => {
-    const count = (text.match(new RegExp(word, "gi")) || []).length;
-    wordCounts.set(word, count);
+    // Escape special regex characters to avoid regex syntax errors
+    const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+      const count = (text.match(new RegExp(escapedWord, "gi")) || []).length;
+      wordCounts.set(word, count);
+    } catch (e) {
+      // If regex fails, just set count to 1
+      wordCounts.set(word, 1);
+    }
   });
 
   return keywords

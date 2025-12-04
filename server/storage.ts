@@ -23,6 +23,8 @@ export interface IStorage {
   // Extraction operations
   createExtraction(extraction: Partial<Extraction>): Promise<Extraction>;
   getExtractions(documentId: string): Promise<Extraction[]>;
+  getExtraction(documentId: string, extractionType: string): Promise<Extraction | null>;
+  updateExtraction(id: string, data: any): Promise<Extraction | null>;
 
   // Chat operations
   getChatMessages(documentId: string): Promise<ChatMessage[]>;
@@ -127,6 +129,19 @@ export class MongoStorage implements IStorage {
 
   async getExtractions(documentId: string): Promise<Extraction[]> {
     return this.extractions.find({ documentId }).toArray();
+  }
+
+  async getExtraction(documentId: string, extractionType: string): Promise<Extraction | null> {
+    return this.extractions.findOne({ documentId, extractionType });
+  }
+
+  async updateExtraction(id: string, data: any): Promise<Extraction | null> {
+    const result = await this.extractions.findOneAndUpdate(
+      { _id: new ObjectId(id) as any },
+      { $set: { data, updatedAt: new Date() } },
+      { returnDocument: 'after' }
+    );
+    return result;
   }
 
   // Chat operations

@@ -12,8 +12,11 @@ import { generateDocumentSummary, extractKeywords, isGeminiConfigured } from "./
 import { extractEntities, extractTablesFromText, getTextStatistics, extractKeywordsFromText } from "./nlp";
 import type { DocumentAnalysis } from "@shared/schema";
 
+// Use createRequire for CommonJS module (pdf-parse)
 const require = createRequire(import.meta.url);
-const pdf = require("pdf-parse");
+
+// pdf-parse is a simple function that takes a buffer
+const pdfParse = require("pdf-parse");
 
 // Configure multer for file uploads
 const uploadDir = path.join(process.cwd(), "uploads");
@@ -92,7 +95,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/documents/:id", isAuthenticated, async (req: any, res: Response) => {
     try {
-      const doc = await storage.getDocumentWithExtractions(req.params.id);
+      const docId = req.params.id;
+      
+      // Validate document ID
+      if (!docId || docId === 'undefined' || docId === 'null') {
+        return res.status(400).json({ message: "Invalid document ID" });
+      }
+      
+      const doc = await storage.getDocumentWithExtractions(docId);
       if (!doc) {
         return res.status(404).json({ message: "Document not found" });
       }
@@ -130,9 +140,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Process the PDF asynchronously
-      processDocument(doc.id, file.path).catch((error) => {
+      processDocument(doc._id, file.path).catch((error) => {
         console.error("Error processing document:", error);
-        storage.updateDocument(doc.id, { status: "error" });
+        storage.updateDocument(doc._id, { status: "error" });
       });
 
       res.json(doc);
@@ -164,6 +174,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting document:", error);
       res.status(500).json({ message: "Failed to delete document" });
+    }
+  });
+
+  // Retry/reprocess failed document
+  app.post("/api/documents/:id/retry", isAuthenticated, async (req: any, res: Response) => {
+    try {
+      const doc = await storage.getDocument(req.params.id);
+      if (!doc) {
+        return res.status(404).json({ message: "Document not found" });
+      }
+      
+      if (doc.userId !== req.user.claims.sub) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      // Check if file exists
+      const filePath = path.join(uploadDir, doc.filename);
+      if (!fs.existsSync(filePath)) {
+        return res.status(404).json({ message: "Document file not found" });
+      }
+
+      // Reset status and start reprocessing
+      await storage.updateDocument(req.params.id, { status: "processing", processingProgress: 0 });
+      
+      // Process asynchronously
+      processDocument(doc._id, filePath).catch((error) => {
+        console.error("Error reprocessing document:", error);
+        storage.updateDocument(doc._id, { status: "error", processingProgress: -1 });
+      });
+
+      res.json({ message: "Document reprocessing started", status: "processing" });
+    } catch (error) {
+      console.error("Error retrying document:", error);
+      res.status(500).json({ message: "Failed to retry document" });
     }
   });
 
@@ -276,11 +320,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const reprocessingPromises = stuckDocuments.map(doc => {
           const filePath = path.join(uploadDir, doc.filename);
           if (fs.existsSync(filePath)) {
-            console.log(`- Reprocessing: ${doc.originalName} (ID: ${doc.id})`);
-            return processDocument(doc.id, filePath);
+            console.log(`- Reprocessing: ${doc.originalName} (ID: ${doc._id})`);
+            return processDocument(doc._id, filePath);
           } else {
-            console.warn(`- File not found for document ${doc.id}. Marking as error.`);
-            return storage.updateDocument(doc.id, { status: "error" });
+            console.warn(`- File not found for document ${doc._id}. Marking as error.`);
+            return storage.updateDocument(doc._id, { status: "error" });
           }
         });
 
@@ -299,44 +343,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
   return httpServer;
 }
 
+// Utility function to add timeout to async operations
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => 
+      setTimeout(() => reject(new Error(errorMsg)), timeoutMs)
+    )
+  ]);
+}
+
 async function processDocument(documentId: string, filePath: string): Promise<void> {
   try {
     await storage.updateDocument(documentId, { status: "processing", processingProgress: 10 });
 
-    // Read and parse PDF
+    // Read and parse PDF with timeout (30 seconds max)
     const dataBuffer = fs.readFileSync(filePath);
-    const pdfData = await pdf(dataBuffer);
-    await storage.updateDocument(documentId, { processingProgress: 25 });
-
+    const pdfData: any = await withTimeout(
+      pdfParse(dataBuffer),
+      30000,
+      "PDF parsing timed out after 30 seconds"
+    );
+    
     const text = pdfData.text || "";
     const pageCount = pdfData.numpages || 1;
+    
+    // Update progress after we have the data
+    await storage.updateDocument(documentId, { processingProgress: 25 });
 
-    // Save extracted text
-    await storage.createPage({
-      documentId,
-      pageNumber: 1,
-      extractedText: text,
-      ocrConfidence: 1.0,
-    });
+    // Truncate very long texts for faster processing
+    const maxTextLength = 50000; // Limit to ~50KB of text
+    const processText = text.length > maxTextLength ? text.substring(0, maxTextLength) : text;
+    
+    // Run page save and NLP in parallel for speed
+    const [_, stats] = await Promise.all([
+      storage.createPage({
+        documentId,
+        pageNumber: 1,
+        extractedText: text,
+        ocrConfidence: 1.0,
+      }),
+      getTextStatistics(processText)
+    ]);
     await storage.updateDocument(documentId, { processingProgress: 40 });
 
-    // Run NLP tasks in parallel
-    const [entities, nlpKeywords, tables, stats] = await Promise.all([
-      Promise.resolve(extractEntities(text)),
-      Promise.resolve(extractKeywordsFromText(text)),
-      Promise.resolve(extractTablesFromText(text)),
-      Promise.resolve(getTextStatistics(text)),
-    ]);
+    // Run lighter NLP tasks with timeout (10 seconds max)
+    const [entities, nlpKeywords] = await withTimeout(
+      Promise.all([
+        extractEntities(processText),
+        extractKeywordsFromText(processText),
+      ]),
+      10000,
+      "NLP processing timed out"
+    ).catch(() => [[], []] as [any[], string[]]);
+    
     await storage.updateDocument(documentId, { processingProgress: 60 });
 
-    const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20).slice(0, 3);
-    const summary = sentences.join(". ") + (sentences.length > 0 ? "." : "No summary available.");
+    // Generate quick summary from first few sentences
+    const sentences = processText.split(/[.!?]+/).filter((s: string) => s.trim().length > 20).slice(0, 5);
+    const summary = sentences.length > 0 
+      ? sentences.join(". ") + "." 
+      : "No summary available.";
 
     const analysis: DocumentAnalysis = {
       summary,
       keywords: nlpKeywords.slice(0, 15),
       entities,
-      tables,
+      tables: [], // Skip heavy table extraction for speed
       wordCount: stats.wordCount,
       characterCount: stats.characterCount,
     };
@@ -346,20 +419,21 @@ async function processDocument(documentId: string, filePath: string): Promise<vo
       extractionType: "analysis",
       data: analysis,
     });
-    await storage.updateDocument(documentId, { processingProgress: 80 });
 
-    // Enhance with AI if configured
-    if (isGeminiConfigured()) {
-      await enhanceAnalysisWithAI(documentId, text);
-      await storage.updateDocument(documentId, { processingProgress: 90 });
-    }
-
+    // Mark as completed first, then enhance with AI asynchronously (non-blocking)
     await storage.updateDocument(documentId, {
       status: "completed",
       processedAt: new Date(),
       pageCount,
       processingProgress: 100,
     });
+
+    // Enhance with AI if configured (fire and forget - don't block completion)
+    if (isGeminiConfigured()) {
+      enhanceAnalysisWithAI(documentId, text).catch(error => {
+        console.error(`AI enhancement failed for document ${documentId}:`, error);
+      });
+    }
 
   } catch (error) {
     console.error("Error processing document:", error);
@@ -370,17 +444,28 @@ async function processDocument(documentId: string, filePath: string): Promise<vo
 
 async function enhanceAnalysisWithAI(documentId: string, text: string): Promise<void> {
   try {
-    const [summary, aiKeywords] = await Promise.all([
-      generateDocumentSummary(text),
-      extractKeywords(text),
-    ]);
+    // Limit text size for AI to avoid long processing times
+    const maxTextLength = 5000;
+    const textForAI = text.length > maxTextLength ? text.substring(0, maxTextLength) : text;
+
+    // Add timeout to AI calls (45 seconds max)
+    const [summary, aiKeywords] = await withTimeout(
+      Promise.all([
+        generateDocumentSummary(textForAI),
+        extractKeywords(textForAI),
+      ]),
+      45000,
+      "AI enhancement timed out after 45 seconds"
+    );
 
     const existingExtraction = await storage.getExtraction(documentId, "analysis");
     if (existingExtraction) {
       const analysis = existingExtraction.data as DocumentAnalysis;
       analysis.summary = summary;
-      analysis.keywords = [...new Set([...aiKeywords, ...analysis.keywords])].slice(0, 15);
-      await storage.updateExtraction(existingExtraction.id, analysis);
+      // Merge and deduplicate keywords
+      const mergedKeywords = Array.from(new Set([...aiKeywords, ...analysis.keywords]));
+      analysis.keywords = mergedKeywords.slice(0, 15);
+      await storage.updateExtraction(existingExtraction._id, analysis);
     }
   } catch (error) {
     console.error("AI enhancement failed:", error);

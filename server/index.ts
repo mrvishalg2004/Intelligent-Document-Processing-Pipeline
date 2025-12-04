@@ -79,15 +79,11 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
-  const port = parseInt(process.env.PORT || "5000", 10);
-  httpServer.listen(
-    {
-      port,
-      host: "0.0.0.0",
-      reusePort: true,
-    },
-    () => {
-      log(`serving on port ${port}`);
-    },
-  );
+  const port = parseInt(process.env.PORT || "5005", 10);
+  // Some platforms or Node builds do not support advanced listen options (like reusePort)
+  // when binding to certain addresses. Use the simpler listen signature to avoid
+  // ENOTSUP errors on macOS / some environments.
+  httpServer.listen(port, () => {
+    log(`serving on port ${port}`);
+  });
 })();
