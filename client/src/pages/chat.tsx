@@ -20,7 +20,7 @@ import {
   ArrowLeft,
   Quote,
 } from "lucide-react";
-import type { Document, ChatMessage } from "@shared/schema";
+import type { Document, ChatMessage } from "@shared/mongo-schema";
 import { format } from "date-fns";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";

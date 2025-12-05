@@ -36,7 +36,7 @@ import {
   MessageCircle,
   Trash2,
 } from "lucide-react";
-import type { Document } from "@shared/schema";
+import type { Document } from "@shared/mongo-schema";
 import { format } from "date-fns";
 import { toast } from "sonner";
 

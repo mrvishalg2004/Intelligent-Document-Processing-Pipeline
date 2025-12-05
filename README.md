@@ -3,7 +3,6 @@
 A full-stack proof-of-concept for ingesting PDFs, extracting text, performing NLP (entities, keywords, tables), and enabling question-answering over documents using an LLM (Google Gemini) with a React client and a TypeScript + Express server.
 
 **Status:** Ready for local development. Extracted text display and document viewer are implemented. Entities/tables are displayed when extraction data exists for a document.
-
 ---
 
 **Table of contents**

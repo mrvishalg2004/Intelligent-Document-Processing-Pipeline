@@ -21,7 +21,7 @@ import {
   TrendingUp,
   FileDown
 } from "lucide-react";
-import type { ReportsData } from "@shared/schema";
+import type { ReportsData } from "@shared/mongo-schema";
 import { exportToPdf, exportToWord } from '@/lib/exporter';
 import { useRef } from "react";
 
@@ -164,14 +164,16 @@ export default function Reports() {
 
   return (
     <div className="space-y-8">
-      <div className="flex justify-between items-start">
-        <div>
-          <h1 className="text-3xl font-semibold" data-testid="text-reports-title">Reports & Analytics</h1>
-          <p className="text-muted-foreground mt-1">
+      <div className="flex flex-col space-y-4 sm:flex-row sm:justify-between sm:items-start sm:space-y-0">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-3xl font-semibold mb-2" data-testid="text-reports-title">
+            Reports & Analytics
+          </h1>
+          <p className="text-muted-foreground text-base leading-relaxed">
             Visual insights from your processed documents
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 flex-shrink-0">
           <Button variant="outline" onClick={() => handleExport('pdf')}>
             <FileDown className="w-4 h-4 mr-2" />
             Export PDF

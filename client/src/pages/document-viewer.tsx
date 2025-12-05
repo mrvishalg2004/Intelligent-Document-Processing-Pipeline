@@ -29,7 +29,7 @@ import {
   Calendar,
   Banknote,
 } from "lucide-react";
-import type { Document, Extraction, DocumentAnalysis, ExtractedEntity, ExtractedTable } from "@shared/schema";
+import type { Document, Extraction, DocumentAnalysis, ExtractedEntity, ExtractedTable } from "@shared/mongo-schema";
 import { format } from "date-fns";
 
 function getStatusBadge(status: string) {

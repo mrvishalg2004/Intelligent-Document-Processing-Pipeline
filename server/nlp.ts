@@ -1,5 +1,5 @@
 import nlp from "compromise";
-import type { ExtractedEntity, ExtractedTable } from "@shared/schema";
+import type { ExtractedEntity, ExtractedTable } from "@shared/mongo-schema";
 
 export function extractEntities(text: string): ExtractedEntity[] {
   const doc = nlp(text);

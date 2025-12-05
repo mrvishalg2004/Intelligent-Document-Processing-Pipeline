@@ -84,6 +84,19 @@ export interface DocumentAnalysis {
   };
 }
 
+// Entity extraction types
+export interface ExtractedEntity {
+  type: string;
+  text: string;
+  confidence: number;
+}
+
+export interface ExtractedTable {
+  headers: string[];
+  rows: string[][];
+  confidence: number;
+}
+
 // Reports Data Type
 export interface ReportsData {
   totalDocuments: number;
